@@ -160,6 +160,16 @@ SELECT DISTINCT natural_key FROM ranked WHERE prev_obs IS NOT NULL;  -- 1 row = 
   because a reverted hash keeps its original `first_seen`.
 - Want a smaller DB? `python3 sqlite/ingest.py --max-revisions 90` (~2.5 months of
   revisions, ~200 MB). A lighter option: `--since 2026-09-01`.
+- **Platform coverage is not exhaustive.** The upstream scraper follows a fixed set of
+  boards (`scripts/fetch-jobs.ts`): the `hrp` feed (all agencies), greenhouse board
+  `govtech`, and workable account `psd-sg` **only**. Any agency hosting on its own ATS
+  is invisible, and a posting that migrates between boards shows up here as "removed"
+  while still live on jobs.careers.gov.sg. Known example: CSA's Workable board
+  `csa-sg` (~29 live roles) is not ingested — e.g.
+  `workable|csa-sg|273E67D3FC` (Assistant Director (Masterplanning)) exists live on
+  Workable but never appears in this DB (its earlier `hrp|17822284|...` incarnation
+  was last seen 2026-09-01). Treat "removed" as "left the tracked boards", not
+  "definitely taken down".
 
 ## Files
 
