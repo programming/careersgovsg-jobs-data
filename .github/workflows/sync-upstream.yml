@@ -6,9 +6,12 @@ name: Sync upstream
 # normally clean.
 
 on:
-  # After the upstream fetch bots run (10 2,7 * * 1-5), plus a daily catch-up.
+  # Upstream commits data twice per weekday, ~03:10-03:30 and ~08:10-08:30 UTC
+  # (cron '10 2,7 * * 1-5' plus ~30-35 min runtime). Sync ~50 min after each
+  # cron so the day's commit has landed before we merge.
   schedule:
-    - cron: '50 2,7 * * 1-5'
+    - cron: '20 3,8 * * 1-5'
+    # Daily catch-up for runs that were queued or finished late.
     - cron: '0 13 * * *'
   workflow_dispatch:
 

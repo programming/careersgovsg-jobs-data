@@ -32,7 +32,11 @@ python3 sqlite/query.py content_history --param natural_key='hrp|17643792|005056
 The `Build SQLite warehouse` workflow (`.github/workflows/build-sqlite.yml`) keeps a
 ready-built full-history database available without anyone running a backfill:
 
-- runs after each `Fetch Jobs Data` run (plus a scheduled safety net),
+- `Sync upstream` (`.github/workflows/sync-upstream.yml`) merges upstream's data
+  commits and dispatches a rebuild whenever it brings in something new. Upstream
+  commits data twice per weekday (`10 2,7 * * 1-5` UTC plus ~30-35 min runtime), so
+  the sync runs at `20 3,8 * * 1-5` with a daily `0 13 * * *` catch-up; the build
+  workflow also carries a `15 4,9 * * 1-5` safety net.
 - restores the previous DB from the `sqlite-warehouse` release and adds only the new
   revisions (full rebuild if the restored file is from an older schema),
 - uploads the refreshed `jobs.db` back to the `sqlite-warehouse` release with

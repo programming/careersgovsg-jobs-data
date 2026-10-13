@@ -6,13 +6,11 @@ name: Build SQLite warehouse
 # because the full DB (~0.9 GB) is far too large to commit.
 
 on:
-  # After the data-fetch workflow finishes, so the newest revision is included.
-  workflow_run:
-    workflows: ["Fetch Jobs Data"]
-    types: [completed]
-  # Safety net if workflow_run is skipped; ~35 min after the fetch crons (10 2,7 * * 1-5).
+  # Normal path: Sync upstream dispatches this after merging a new revision.
+  # Scheduled safety net a bit after each sync, in case the dispatch is missed.
+  # (No workflow_run trigger here: this fork does not run "Fetch Jobs Data".)
   schedule:
-    - cron: '45 2,7 * * 1-5'
+    - cron: '15 4,9 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -25,8 +23,6 @@ concurrency:
 
 jobs:
   build:
-    # Only react to successful data fetches; manual/scheduled runs always proceed.
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Check out full history
