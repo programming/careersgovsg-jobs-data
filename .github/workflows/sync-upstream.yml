@@ -1,0 +1,54 @@
+name: Sync upstream
+
+# Keeps this fork's main in lock-step with opengovsg by merging upstream data
+# commits, then triggers the SQLite warehouse rebuild. Upstream only commits
+# under data/, and our tooling lives under sqlite/ + .github/, so merges are
+# normally clean.
+
+on:
+  # After the upstream fetch bots run (10 2,7 * * 1-5), plus a daily catch-up.
+  schedule:
+    - cron: '50 2,7 * * 1-5'
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # push the merge to this fork
+  actions: write    # dispatch the Build SQLite warehouse workflow
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this fork's main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream/main
+        id: merge
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/opengovsg/careersgovsg-jobs-data.git
+          git fetch upstream main
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date with upstream."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git merge --no-edit upstream/main
+            git push origin HEAD:main
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger warehouse rebuild
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-sqlite.yml --repo "$GITHUB_REPOSITORY"
