@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS job_snapshots (
   start_date           INTEGER,                          -- epoch ms, NULL if unknown
   closing_date         INTEGER,                          -- epoch ms, NULL = no published deadline
   closing_date_text    TEXT    NOT NULL DEFAULT '',
-  remaining_days       TEXT    NOT NULL DEFAULT '',      -- e.g. 'Today', 'Closing in 3 day(s)'
+  remaining_days       TEXT    NOT NULL DEFAULT '',      -- upstream relative text, e.g. '1 week(s) ago' = time since posting (NOT a countdown)
   employment_type      TEXT    NOT NULL DEFAULT '',
   employment_type_code TEXT    NOT NULL DEFAULT '',
   experience_required  TEXT    NOT NULL DEFAULT '',

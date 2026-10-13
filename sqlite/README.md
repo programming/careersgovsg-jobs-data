@@ -136,6 +136,15 @@ SELECT DISTINCT natural_key FROM ranked WHERE prev_obs IS NOT NULL;  -- 1 row = 
   not necessarily the moment the job was posted (use `start_date` for that).
 - **`closing_date` is `NULL` when the source publishes no deadline** (greenhouse,
   workable). Treat `NULL` as "no deadline", never as "closed".
+- **`remaining_days` is not a closing countdown.** Upstream's `RemainingDays` field is
+  a relative "time since posting" string (mostly `"1 week(s) ago"`, sometimes
+  `"Today"`) — the closing countdown is the separate `closing_date_text` field. Even
+  that text is frozen at snapshot time, so compute live windows from `closing_date`
+  (as `closing_soon` does) rather than trusting either string for "how long left".
+- **Queries that care about "now" should anchor to the latest snapshot**, not
+  wall-clock time: `SELECT MAX(observed_at) FROM snapshots`. The data is a point-in-time
+  copy, and `closing_soon` uses this anchor so its window matches the revision you have.
+  Refresh with `ingest.py` after `git pull` to move the anchor forward.
 - **`field` and `functional_area` are identical in current data** (same source
   field on hrp/workable) — trust either, they're not independent.
 - Job descriptions contain **raw HTML** from greenhouse/workable sources; strip

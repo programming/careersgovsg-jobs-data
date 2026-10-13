@@ -6,7 +6,7 @@ SELECT
   job_title,
   agency,
   closing_date_text,
-  remaining_days,
+  remaining_days AS posted_ago,  -- upstream relative text (time since posting), not a countdown
   is_new,
   employment_type
 FROM job_snapshots
