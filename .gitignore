@@ -148,3 +148,8 @@ deno.lock
 data/tmp/
 
 data/job-listings-raw.json
+
+# SQLite warehouse (generated locally; rebuild with `python3 sqlite/ingest.py`)
+sqlite/jobs.db
+sqlite/jobs.db-wal
+sqlite/jobs.db-shm

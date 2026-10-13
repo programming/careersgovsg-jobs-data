@@ -1,0 +1,82 @@
+name: Build SQLite warehouse
+
+# Keeps a downloadable SQLite copy of the full job-listing history up to date.
+# The data files are already versioned by git; this job replays that history into
+# sqlite/jobs.db and publishes it as an asset on the `sqlite-warehouse` release,
+# because the full DB (~0.9 GB) is far too large to commit.
+
+on:
+  # After the data-fetch workflow finishes, so the newest revision is included.
+  workflow_run:
+    workflows: ["Fetch Jobs Data"]
+    types: [completed]
+  # Safety net if workflow_run is skipped; ~35 min after the fetch crons (10 2,7 * * 1-5).
+  schedule:
+    - cron: '45 2,7 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Never run two builds at once; a later build must see the previous DB asset.
+concurrency:
+  group: sqlite-warehouse
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Only react to successful data fetches; manual/scheduled runs always proceed.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          # ingest.py replays every commit that touched data/job-listings.json,
+          # so the full history is required (a shallow clone would lose snapshots).
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Restore previous warehouse (for incremental update)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view sqlite-warehouse >/dev/null 2>&1; then
+            gh release download sqlite-warehouse -p 'jobs.db*' -D sqlite || true
+          else
+            echo "No previous warehouse release; a full backfill will run."
+          fi
+          ls -lh sqlite/ || true
+
+      - name: Build or update warehouse
+        run: |
+          set -euo pipefail
+          # If the restored DB is from an older schema (or corrupt), fall back to
+          # a clean full rebuild rather than failing the run.
+          if ! python3 sqlite/ingest.py; then
+            echo "Incremental update failed; rebuilding from scratch."
+            rm -f sqlite/jobs.db sqlite/jobs.db-wal sqlite/jobs.db-shm
+            python3 sqlite/ingest.py
+          fi
+
+      - name: Remove SQLite sidecar files before publishing
+        run: rm -f sqlite/jobs.db-wal sqlite/jobs.db-shm
+
+      - name: Publish warehouse as a release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view sqlite-warehouse >/dev/null 2>&1; then
+            gh release create sqlite-warehouse \
+              --title "SQLite warehouse" \
+              --notes "Auto-built from the full git history of data/job-listings.json. Download jobs.db and see sqlite/README.md for queries." \
+              --target "${GITHUB_SHA}"
+          fi
+          gh release upload sqlite-warehouse sqlite/jobs.db --clobber
+          echo "Published jobs.db ($(du -h sqlite/jobs.db | cut -f1)) to the sqlite-warehouse release."
