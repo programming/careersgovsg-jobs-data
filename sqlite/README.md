@@ -56,7 +56,7 @@ a consistent database. Nothing is committed to git — the asset lives on the re
 ## Data model
 
 ```
-snapshots      one row per ingested git revision
+snapshots      one row per ingested git revision of data/job-listings.json
                (commit sha, observed_at = UTC commit time, records)
 job_snapshots  one row per (snapshot, job) — light, trackable fields only
                (platform, ids, natural_key, title, agency, dates, experience,
@@ -80,6 +80,15 @@ history is complete, and unchanged text is stored only once. Measured sizes (Oct
 
 Use `--max-revisions 90` for a lighter build; the full backfill is only needed if
 you want to chart agency/field trends over the whole repo history.
+
+Each snapshot also carries the **Workable side channel** — the public-sector
+Workable accounts upstream's fetcher misses (`data/workable-job-listings.json`,
+written by `.github/workflows/fetch-workable.yml`). The ingester resolves that
+file's state at the moment of each main revision (newest side-channel commit at or
+before the revision's commit time) and folds it into the same snapshot, so
+`current_jobs` keeps meaning "live in the newest snapshot" instead of alternating
+between two sources' snapshots. Side-channel history therefore starts when the
+main feed's next revision lands, and only for postings live from then on.
 
 `natural_key` = `platform|jobId|postingNo`, stable across revisions for the same
 posting (e.g. `hrp|17643792|005056a3-...`). The `current_jobs` view exposes it.
@@ -178,6 +187,7 @@ SELECT DISTINCT natural_key FROM ranked WHERE prev_obs IS NOT NULL;  -- 1 row = 
 
 ```
 schema.sql   tables + current_jobs view (applied automatically by the ingester)
+             (the Workable side channel is folded in by ingest.py — see above)
 ingest.py    backfill/incremental loader (stdlib only, idempotent)
 query.py     query runner: reads sqlite/queries/*.sql, binds --param
 queries/     the analysis queries shown above

@@ -149,7 +149,7 @@ interface GreenhouseResponse {
   meta?: { total: number }
 }
 
-interface WorkableJobSummary {
+export interface WorkableJobSummary {
   title: string
   shortcode: string
   code: string
@@ -171,13 +171,13 @@ interface WorkableJobSummary {
   locations?: Array<{ country: string; countryCode: string; city: string; region: string; hidden: boolean }>
 }
 
-interface WorkableAccountResponse {
+export interface WorkableAccountResponse {
   name: string
   description: string
   jobs: WorkableJobSummary[]
 }
 
-interface WorkableJobDetail {
+export interface WorkableJobDetail {
   id: number
   shortcode: string
   title: string
@@ -194,7 +194,25 @@ interface WorkableJobDetail {
   location?: { country: string; countryCode: string; city: string; region: string }
 }
 
-interface ProcessedJob {
+/**
+ * Workable accounts to fetch: slugs are Workable *account* ids (the hiring
+ * organisation), not per-posting ids. The widget endpoint behind them is
+ * unauthenticated. Verified 2026-11-04 against Workable's company directory
+ * (jobs.workable.com), keeping only organisations publishing under a .gov.sg
+ * site - these six are the Singapore public-sector accounts. Re-check any
+ * entry in one call:
+ *   https://apply.workable.com/api/v1/widget/accounts/<slug>
+ */
+export const WORKABLE_ACCOUNTS = [
+  'psd-sg',   // Public Service Division
+  'csa-sg',   // Cyber Security Agency of Singapore
+  'mddi-sg',  // Ministry of Digital Development and Information
+  'mha-sg',   // Ministry of Home Affairs
+  'mom-sg',   // Ministry of Manpower
+  'moe-sg',   // Ministry of Education (no live postings at present)
+]
+
+export interface ProcessedJob {
   platform: string
   postingNo: string
   jobId: string
@@ -243,14 +261,14 @@ function parseODataDate(odataDate: string): number {
 /**
  * Parse ISO 8601 date to epoch millis. Returns NaN for null/empty/invalid input.
  */
-function parseISODate(iso: string | null | undefined): number {
+export function parseISODate(iso: string | null | undefined): number {
   return iso ? Date.parse(iso) : NaN
 }
 
 /**
  * Clean string by trimming and removing non-breaking spaces
  */
-function cleanString(str: string): string {
+export function cleanString(str: string): string {
   return str.replace(/\u00a0/g, ' ').trim()
 }
 
@@ -259,7 +277,7 @@ function cleanString(str: string): string {
  * (e.g. Greenhouse content where `&` characters are encoded as `&amp;amp;`).
  * HTML tags are left intact.
  */
-function decodeHtmlEntities(input: string): string {
+export function decodeHtmlEntities(input: string): string {
   if (!input) return ''
   let prev = input
   let curr = unescapeHtml(prev)
@@ -457,7 +475,7 @@ async function fetchGreenhouseBoard(board: string): Promise<GreenhouseJob[]> {
  * run for the remaining accounts.
  * Returns null when the account is gone.
  */
-async function fetchWorkableAccount(account: string): Promise<WorkableAccountResponse | null> {
+export async function fetchWorkableAccount(account: string): Promise<WorkableAccountResponse | null> {
   const url = `https://apply.workable.com/api/v1/widget/accounts/${account}`
   console.log(`Fetching Workable account: ${account}`)
   const response = await fetch(url, { headers: { Accept: 'application/json' } })
@@ -475,7 +493,7 @@ async function fetchWorkableAccount(account: string): Promise<WorkableAccountRes
  * Fetch a single Workable job's detail (description, requirements, workplace).
  * Throws on network or HTTP errors.
  */
-async function fetchWorkableJobDetail(account: string, shortcode: string): Promise<WorkableJobDetail> {
+export async function fetchWorkableJobDetail(account: string, shortcode: string): Promise<WorkableJobDetail> {
   const url = `https://apply.workable.com/api/v2/accounts/${account}/jobs/${shortcode}`
   const response = await fetch(url, { headers: { Accept: 'application/json' } })
   if (!response.ok) {
@@ -490,7 +508,7 @@ async function fetchWorkableJobDetail(account: string, shortcode: string): Promi
  * per-posting `shortcode`. The agency name and description are shared across all
  * jobs in the account and sourced once from the listings response.
  */
-function processWorkableJob(
+export function processWorkableJob(
   summary: WorkableJobSummary,
   detail: WorkableJobDetail,
   account: string,
@@ -601,22 +619,8 @@ async function main() {
       console.log(`✅ Processed ${processed.length} Greenhouse jobs from ${board}`)
     }
 
-    // Fetch and merge Workable accounts. Slugs are Workable *account* ids (the
-    // hiring organisation), not per-posting ids; the public widget endpoint is
-    // unauthenticated. Verified against the Workable company directory
-    // (jobs.workable.com) for organisations publishing under a .gov.sg site -
-    // these six are the Singapore public-sector accounts, and psd-sg/govtech
-    // are the only ones the upstream fetcher covered. To re-check the list:
-    //   https://apply.workable.com/api/v1/widget/accounts/<slug>
-    const workableAccounts = [
-      'psd-sg',   // Public Service Division
-      'csa-sg',   // Cyber Security Agency of Singapore
-      'mddi-sg',  // Ministry of Digital Development and Information
-      'mha-sg',   // Ministry of Home Affairs
-      'mom-sg',   // Ministry of Manpower
-      'moe-sg',   // Ministry of Education (no live postings at present)
-    ]
-    for (const [acctIndex, account] of workableAccounts.entries()) {
+    // Fetch and merge Workable accounts (see WORKABLE_ACCOUNTS)
+    for (const [acctIndex, account] of WORKABLE_ACCOUNTS.entries()) {
       if (acctIndex > 0) {
         // One listings call per account; space them out to stay clear of
         // Workable's per-IP rate limiting on the public API.

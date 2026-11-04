@@ -3,7 +3,9 @@
 
 Data model
 ----------
-- snapshots: one row per git revision (observed_at = git committer time, UTC).
+- snapshots: one row per git revision of `data/job-listings.json` (observed_at =
+  git committer time, UTC), carrying that revision's jobs plus the Workable
+  side-channel state current at the same moment (see WORKABLE_JSON_PATH).
 - job_snapshots: one row per (snapshot, job) with light, trackable fields.
 - job_content: heavy description text, deduplicated by content hash and versioned
   by first_seen/last_seen so re-running only stores text that actually changed.
@@ -37,6 +39,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HERE = Path(__file__).resolve().parent
 JSON_PATH = "data/job-listings.json"
+# Side channel: the public-sector Workable accounts, fetched by
+# .github/workflows/fetch-workable.yml. Those postings are not in the OData feed,
+# and the file is written only by that workflow, so it is a separate source that
+# needs its own revision history.
+WORKABLE_JSON_PATH = "data/workable-job-listings.json"
 SCHEMA_PATH = HERE / "schema.sql"
 DEFAULT_DB = HERE / "jobs.db"
 
@@ -100,10 +107,10 @@ def to_utc_iso(value: str) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def git_commits() -> list[tuple[str, str]]:
-    """Return [(sha, iso_committer_time)] for every commit touching the data file, oldest first."""
+def git_commits(path: str = JSON_PATH) -> list[tuple[str, str]]:
+    """Return [(sha, iso_committer_time)] for every commit touching `path`, oldest first."""
     proc = subprocess.run(
-        ["git", "log", "--reverse", "--format=%H%x1f%cI", "--", JSON_PATH],
+        ["git", "log", "--reverse", "--format=%H%x1f%cI", "--", path],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -117,10 +124,10 @@ def git_commits() -> list[tuple[str, str]]:
     return out
 
 
-def read_revision(sha: str) -> list | None:
+def read_revision(sha: str, path: str = JSON_PATH) -> list | None:
     """Return the parsed job list as present at commit `sha`, or None if absent."""
     proc = subprocess.run(
-        ["git", "show", f"{sha}:{JSON_PATH}"],
+        ["git", "show", f"{sha}:{path}"],
         cwd=REPO_ROOT,
         capture_output=True,
         check=False,
@@ -128,6 +135,27 @@ def read_revision(sha: str) -> list | None:
     if proc.returncode != 0 or not proc.stdout:
         return None
     return json.loads(proc.stdout)
+
+
+def workable_state_at(commits: list[tuple[str, str]], observed_at: str) -> list:
+    """Return the Workable side-channel jobs current at `observed_at`, or [].
+
+    The side channel commits on its own schedule, so its state is resolved by
+    time: the newest side-channel revision at or before the main revision's
+    committer time. This keeps one unified snapshot per main revision (and so
+    keeps `current_jobs` meaning "live in the newest snapshot"), instead of
+    interleaving a second set of snapshot rows that would alternate which jobs
+    the view reports.
+    """
+    chosen = None
+    for sha, ts in commits:
+        if to_utc_iso(ts) <= observed_at:
+            chosen = sha
+        else:
+            break
+    if chosen is None:
+        return []
+    return read_revision(chosen, WORKABLE_JSON_PATH) or []
 
 
 def ingest_revision(conn: sqlite3.Connection, sha: str, observed_at: str, jobs: list) -> None:
@@ -226,6 +254,8 @@ def main() -> int:
 
     commits = git_commits()
     print(f"{len(commits)} revisions found in git history")
+    workable_commits = git_commits(WORKABLE_JSON_PATH)
+    print(f"{len(workable_commits)} workable side-channel revisions found")
 
     if args.since:
         since = to_utc_iso(f"{args.since}T00:00:00+00:00")
@@ -253,6 +283,9 @@ def main() -> int:
         jobs = read_revision(sha)
         if jobs is None:
             continue  # revision predates the data file
+        side = workable_state_at(workable_commits, observed_at)
+        if side:
+            jobs = jobs + side
         conn.execute("BEGIN")
         ingest_revision(conn, sha, observed_at, jobs)
         conn.commit()
@@ -266,6 +299,8 @@ def main() -> int:
     n_rows = conn.execute("SELECT COUNT(*) FROM job_snapshots").fetchone()[0]
     n_content = conn.execute("SELECT COUNT(*) FROM job_content").fetchone()[0]
     n_current = conn.execute("SELECT COUNT(*) FROM current_jobs").fetchone()[0]
+    n_current_side = conn.execute(
+        "SELECT COUNT(*) FROM current_jobs WHERE platform = 'workable'").fetchone()[0]
     first, last = conn.execute("SELECT MIN(observed_at), MAX(observed_at) FROM snapshots").fetchone()
     size_mb = args.db.stat().st_size / 1e6
     conn.close()
@@ -274,7 +309,7 @@ def main() -> int:
     print(f"  snapshots : {n_snaps}   ({first} → {last})")
     print(f"  job rows  : {n_rows}   (~{n_snap_jobs(n_rows, n_snaps)}/revision)")
     print(f"  content   : {n_content} unique text versions")
-    print(f"  current   : {n_current} live jobs")
+    print(f"  current   : {n_current} live jobs ({n_current_side} workable side-channel)")
     print(f"  db size   : {size_mb:.1f} MB  ({args.db})")
     return 0
 

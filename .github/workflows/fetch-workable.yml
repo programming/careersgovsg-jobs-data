@@ -1,0 +1,76 @@
+name: Fetch Workable Data
+
+# Fetches the Singapore public-sector Workable accounts into their own data
+# file. Workable postings are not in the Careers@Gov OData feed (which carries
+# SAP SuccessFactors requisitions only), so upstream's fetcher misses every
+# agency that publishes to its own Workable account - CSA's whole professional
+# board among them.
+#
+# This runs as a side channel rather than by enabling the fork's copy of
+# upstream's "Fetch Jobs Data": that workflow needs Careers@Gov endpoint secrets
+# this fork does not have, and its commits would collide with Sync upstream over
+# data/job-listings.json. `data/workable-job-listings.json` is written only
+# here, so upstream merges stay clean.
+#
+# Runs ~30 min *before* upstream's data commits land (cron '10 2,7 * * 1-5' plus
+# ~30-35 min runtime), so when the fork ingests the day's main revision the
+# Workable state for that moment is already committed.
+
+on:
+  schedule:
+    - cron: '40 2,7 * * 1-5'
+    # Daily catch-up for runs that were queued or finished late.
+    - cron: '30 13 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # commit the fetched file
+  actions: write    # dispatch the Build SQLite warehouse workflow
+
+concurrency:
+  group: fetch-workable
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Fetch Workable listings
+        run: |
+          deno run --allow-import --allow-net --allow-read --allow-write \
+            scripts/fetch-workable.ts data/workable-job-listings.json
+
+      - name: Commit if changed
+        id: commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/workable-job-listings.json data/workable-job-listings.csv
+          if git diff --cached --quiet; then
+            echo "No change - board unchanged, nothing to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "Flat: latest workable data ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          # main may have moved under us (Sync upstream merges data commits);
+          # this file is only ever written here, so a rebase is clean.
+          git pull --rebase --autostash origin main
+          git push origin HEAD:main
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger warehouse rebuild
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-sqlite.yml --repo "$GITHUB_REPOSITORY"
