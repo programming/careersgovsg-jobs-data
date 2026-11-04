@@ -167,10 +167,12 @@ SELECT DISTINCT natural_key FROM ranked WHERE prev_obs IS NOT NULL;  -- 1 row = 
   `mha-sg`, `mom-sg`, `moe-sg`. An agency on an ATS outside that list is still
   invisible, and a posting that migrates between boards shows up here as
   "removed" while still live on jobs.careers.gov.sg. Treat "removed" as "left
-  the tracked boards", not "definitely taken down". The Workable accounts were
-  added 2026-11-04; nothing back-fills, so their postings only appear in
-  revisions committed after that date (the ATS API serves current listings, not
-  history).
+  the tracked boards", not "definitely taken down". Note the Workable accounts
+  beyond `psd-sg` were added to this fork's fetcher on 2026-11-04: upstream's
+  fetcher still reads `psd-sg` only, and because this fork normally takes its
+  data commits *from* upstream, those five accounts only land here once the
+  fork fetches its own data. Nothing back-fills either way — the ATS API serves
+  current listings, not history.
 
 ## Files
 
