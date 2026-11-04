@@ -137,7 +137,8 @@ def read_revision(sha: str, path: str = JSON_PATH) -> list | None:
     return json.loads(proc.stdout)
 
 
-def workable_state_at(commits: list[tuple[str, str]], observed_at: str) -> list:
+def workable_state_at(commits: list[tuple[str, str]], observed_at: str,
+                      allow_newer: bool = False) -> list:
     """Return the Workable side-channel jobs current at `observed_at`, or [].
 
     The side channel commits on its own schedule, so its state is resolved by
@@ -146,15 +147,25 @@ def workable_state_at(commits: list[tuple[str, str]], observed_at: str) -> list:
     keeps `current_jobs` meaning "live in the newest snapshot"), instead of
     interleaving a second set of snapshot rows that would alternate which jobs
     the view reports.
+
+    `allow_newer` is set for the newest main revision only: there, the newest
+    side-channel state is used even if it postdates that revision, so a board
+    fetched after the day's last data commit still shows up in `live`. Otherwise
+    the newest snapshot could lag the side channel by up to a full run.
     """
-    chosen = None
-    for sha, ts in commits:
-        if to_utc_iso(ts) <= observed_at:
-            chosen = sha
-        else:
-            break
-    if chosen is None:
+    if not commits:
         return []
+    if allow_newer:
+        chosen = commits[-1][0]
+    else:
+        chosen = None
+        for sha, ts in commits:
+            if to_utc_iso(ts) <= observed_at:
+                chosen = sha
+            else:
+                break
+        if chosen is None:
+            return []
     return read_revision(chosen, WORKABLE_JSON_PATH) or []
 
 
@@ -230,6 +241,9 @@ def main() -> int:
     ap.add_argument("--max-revisions", type=int, default=0,
                     help="only ingest the N most recent revisions (0 = all)")
     ap.add_argument("--since", default=None, help="only revisions dated on/after YYYY-MM-DD")
+    ap.add_argument("--refresh-latest", action="store_true",
+                    help="re-ingest the newest revision, rewriting that snapshot's rows "
+                         "(use when a side-channel state arrived after it was ingested)")
     ap.add_argument("--jobs-json", type=Path, default=None,
                     help="ingest a single local file instead of git history "
                          "(observed_at = file mtime; useful for previews)")
@@ -267,6 +281,16 @@ def main() -> int:
 
     conn = sqlite_connect(args.db)
     existing = {r["sha"] for r in conn.execute("SELECT sha FROM snapshots")}
+
+    if args.refresh_latest and commits:
+        newest_sha = commits[-1][0]
+        row = conn.execute("SELECT observed_at FROM snapshots WHERE sha=?", (newest_sha,)).fetchone()
+        if row is not None:
+            print(f"  --refresh-latest: rewinding {row['observed_at']} for re-ingest")
+            conn.execute("DELETE FROM job_snapshots WHERE observed_at=?", (row["observed_at"],))
+            conn.execute("DELETE FROM snapshots WHERE sha=?", (newest_sha,))
+            conn.commit()
+            existing.discard(newest_sha)
     pending = [(sha, ts) for sha, ts in commits if sha not in existing]
     print(f"  already ingested: {len(commits) - len(pending)}; to ingest: {len(pending)}")
 
@@ -283,7 +307,8 @@ def main() -> int:
         jobs = read_revision(sha)
         if jobs is None:
             continue  # revision predates the data file
-        side = workable_state_at(workable_commits, observed_at)
+        side = workable_state_at(workable_commits, observed_at,
+                                 allow_newer=(sha == commits[-1][0]))
         if side:
             jobs = jobs + side
         conn.execute("BEGIN")

@@ -14,6 +14,9 @@ python3 sqlite/ingest.py
 # after every `git pull`: incremental update (only new revisions are parsed)
 python3 sqlite/ingest.py
 
+# if the Workable side channel moved on since the newest revision was ingested
+python3 sqlite/ingest.py --refresh-latest
+
 # example analysis
 python3 sqlite/query.py latest --limit 20
 python3 sqlite/query.py diff_recent            # new & removed since last run
@@ -87,8 +90,16 @@ written by `.github/workflows/fetch-workable.yml`). The ingester resolves that
 file's state at the moment of each main revision (newest side-channel commit at or
 before the revision's commit time) and folds it into the same snapshot, so
 `current_jobs` keeps meaning "live in the newest snapshot" instead of alternating
-between two sources' snapshots. Side-channel history therefore starts when the
-main feed's next revision lands, and only for postings live from then on.
+between two sources' snapshots. The **newest** main revision is the exception: it
+takes the newest side-channel state even if that postdates it, so a board fetched
+after the day's last data commit still appears in `current_jobs`.
+
+Two consequences worth knowing: side-channel history only starts from the first
+main revision ingested after the side channel exists (nothing back-fills — the
+ATS API serves current listings, not history), and if the side channel has moved
+on since the newest revision was ingested, re-run the ingester with
+`--refresh-latest` to rewrite that one snapshot (the scheduled warehouse rebuild
+does this for itself).
 
 `natural_key` = `platform|jobId|postingNo`, stable across revisions for the same
 posting (e.g. `hrp|17643792|005056a3-...`). The `current_jobs` view exposes it.
