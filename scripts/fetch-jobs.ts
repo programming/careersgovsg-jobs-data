@@ -452,11 +452,19 @@ async function fetchGreenhouseBoard(board: string): Promise<GreenhouseJob[]> {
  * Fetch a Workable account's public listings (agency metadata + job summaries).
  * Throws on network or HTTP errors so the workflow fails loudly rather than
  * silently dropping the account's contribution from the committed output.
+ * A 404 is the one exception: it means the account no longer exists (Workable
+ * slugs are hand-maintained here), so we warn and skip it rather than fail the
+ * run for the remaining accounts.
+ * Returns null when the account is gone.
  */
-async function fetchWorkableAccount(account: string): Promise<WorkableAccountResponse> {
+async function fetchWorkableAccount(account: string): Promise<WorkableAccountResponse | null> {
   const url = `https://apply.workable.com/api/v1/widget/accounts/${account}`
   console.log(`Fetching Workable account: ${account}`)
   const response = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (response.status === 404) {
+    console.warn(`Workable account '${account}' no longer exists (404) - skipping`)
+    return null
+  }
   if (!response.ok) {
     throw new Error(`Workable account fetch failed for ${account}: ${response.status} ${response.statusText}`)
   }
@@ -593,10 +601,29 @@ async function main() {
       console.log(`✅ Processed ${processed.length} Greenhouse jobs from ${board}`)
     }
 
-    // Fetch and merge Workable accounts (e.g. PSD)
-    const workableAccounts = ['psd-sg']
-    for (const account of workableAccounts) {
+    // Fetch and merge Workable accounts. Slugs are Workable *account* ids (the
+    // hiring organisation), not per-posting ids; the public widget endpoint is
+    // unauthenticated. Verified against the Workable company directory
+    // (jobs.workable.com) for organisations publishing under a .gov.sg site -
+    // these six are the Singapore public-sector accounts, and psd-sg/govtech
+    // are the only ones the upstream fetcher covered. To re-check the list:
+    //   https://apply.workable.com/api/v1/widget/accounts/<slug>
+    const workableAccounts = [
+      'psd-sg',   // Public Service Division
+      'csa-sg',   // Cyber Security Agency of Singapore
+      'mddi-sg',  // Ministry of Digital Development and Information
+      'mha-sg',   // Ministry of Home Affairs
+      'mom-sg',   // Ministry of Manpower
+      'moe-sg',   // Ministry of Education (no live postings at present)
+    ]
+    for (const [acctIndex, account] of workableAccounts.entries()) {
+      if (acctIndex > 0) {
+        // One listings call per account; space them out to stay clear of
+        // Workable's per-IP rate limiting on the public API.
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
       const accountData = await fetchWorkableAccount(account)
+      if (accountData === null) continue
       const agency = accountData.name ?? ''
       const agencyDescription = accountData.description ?? ''
       const summaries = accountData.jobs ?? []
