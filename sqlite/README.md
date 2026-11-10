@@ -17,6 +17,10 @@ python3 sqlite/ingest.py
 # if the Workable side channel moved on since the newest revision was ingested
 python3 sqlite/ingest.py --refresh-latest
 
+# or do the whole cycle - merge both remotes, refresh the Workable side channel,
+# ingest, push - in one idempotent, locked command:
+scripts/sync-and-ingest.sh
+
 # example analysis
 python3 sqlite/query.py latest --limit 20
 python3 sqlite/query.py diff_recent            # new & removed since last run
@@ -193,6 +197,15 @@ SELECT DISTINCT natural_key FROM ranked WHERE prev_obs IS NOT NULL;  -- 1 row = 
   data commits *from* upstream, those five accounts only land here once the
   fork fetches its own data. Nothing back-fills either way — the ATS API serves
   current listings, not history.
+
+## Keeping it current
+
+`scripts/sync-and-ingest.sh` is the whole cycle (see Quick start). It runs daily at
+10:00 local via the user units `jobs-sync.service` / `jobs-sync.timer`, logging to
+`~/.hermes/logs/jobs-sync.log`; check it with
+`systemctl --user list-timers jobs-sync.timer` and `tail ~/.hermes/logs/jobs-sync.log`.
+10:00 America/New_York is 14:00-15:00 UTC, i.e. after both of the day's upstream data
+commits and after the fork's 13:00 UTC catch-up merge, so one run covers the day.
 
 ## Files
 
