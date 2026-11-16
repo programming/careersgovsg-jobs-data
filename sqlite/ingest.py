@@ -169,8 +169,32 @@ def workable_state_at(commits: list[tuple[str, str]], observed_at: str,
     return read_revision(chosen, WORKABLE_JSON_PATH) or []
 
 
+def dedupe_jobs(jobs: list) -> list:
+    """One entry per natural_key, last occurrence winning.
+
+    The same posting can arrive twice in one snapshot: the main feed already
+    carries the Workable accounts upstream fetches (``psd-sg``) and the side
+    channel fetches all of them again. A snapshot can only hold one row per
+    (observed_at, natural_key) anyway - job_snapshots is INSERT OR REPLACE - and a
+    duplicate would otherwise be buffered twice into job_content and trip its
+    UNIQUE(natural_key, content_hash) constraint, which broke every fresh build
+    (a full backfill, or any --since/--max-revisions slice) while incremental
+    ingests kept working because the content row already existed.
+
+    Order matters: side-channel jobs are appended after the main feed, so the
+    later - side-channel - copy wins.
+    """
+    deduped: dict[str, dict] = {}
+    for raw in jobs:
+        job = dict(raw)
+        job.setdefault("platform", "hrp")
+        deduped[natural_key(job)] = job
+    return list(deduped.values())
+
+
 def ingest_revision(conn: sqlite3.Connection, sha: str, observed_at: str, jobs: list) -> None:
     """Insert one snapshot + its job rows + content rows (idempotent)."""
+    jobs = dedupe_jobs(jobs)
     conn.execute(
         "INSERT OR REPLACE INTO snapshots(sha, observed_at, records) VALUES (?,?,?)",
         (sha, observed_at, len(jobs)),
@@ -178,10 +202,10 @@ def ingest_revision(conn: sqlite3.Connection, sha: str, observed_at: str, jobs: 
 
     snap_rows = []
     content_new = []
-    for raw in jobs:
-        # Revisions before 2026-05 (platform field added) were hrp-only.
-        job = dict(raw)
-        job.setdefault("platform", "hrp")
+    buffered = set()
+    for job in jobs:
+        # Revisions before 2026-05 (platform field added) were hrp-only; the
+        # platform default is applied in dedupe_jobs().
         key = natural_key(job)
         digest = content_hash(job)
 
@@ -199,7 +223,8 @@ def ingest_revision(conn: sqlite3.Connection, sha: str, observed_at: str, jobs: 
         ).fetchone()
         if row:
             conn.execute("UPDATE job_content SET last_seen=? WHERE id=?", (observed_at, row[0]))
-        else:
+        elif (key, digest) not in buffered:
+            buffered.add((key, digest))
             content_new.append([key, digest, observed_at, observed_at] + [job.get(f, "") for f in CONTENT_FIELDS])
 
     snap_columns = ["observed_at", "natural_key"] + [c for _, c in LIGHT_FIELDS] + ["content_hash"]
