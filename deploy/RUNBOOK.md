@@ -75,13 +75,24 @@ ingested, and the DB is stale. Baseline for comparison (2026-11-16): 398 snapsho
 842,172 job rows, 2,068 live (1,739 hrp / 275 greenhouse / 54 workable), `watchlist`
 0 rows (unused — nothing in the DB depends on it).
 
+## Rebuild, verified
+
+A full history rebuild from a bare clone was run end-to-end on 2026-11-16: clone
+(38 s) + `python3 sqlite/ingest.py` (374 s, 398 revisions) produced a 982 MB DB with
+the same snapshot count, the same 28,013 content rows and the same 2,068 live
+postings as the working copy, `pragma quick_check` ok. Two things to expect:
+
+- The rebuild is not row-for-row identical: five historical snapshots differ by a
+  few rows each (~50 rows, 0.006%). Those were manually re-ingested
+  (`--refresh-latest`) at the time, which attaches the newest side-channel state to
+  the newest revision; a replay uses the deterministic rule (newest side state at or
+  before that revision's commit). Current state is unaffected.
+- A bug that broke every from-scratch build — a side-channel duplicate tripping
+  `UNIQUE(job_content.natural_key, content_hash)` — was fixed on 2026-11-16
+  (`4d16b6e`). Before that fix a rebuild failed outright.
+
 ## Known gaps
 
-- **A full-history rebuild from a bare clone has not been run end-to-end.** A bug
-  that broke every from-scratch build (a side-channel duplicate tripping
-  `UNIQUE(job_content.natural_key, content_hash)`) was fixed on 2026-11-16 and the
-  fix verified on a slice — rebuild the whole history once when convenient and
-  correct this line.
 - **Coverage is a fixed set of boards**: the Careers@Gov feed (`hrp`), greenhouse
   `govtech`, and the Workable accounts in `WORKABLE_ACCOUNTS`. Agencies on their own
   ATS are invisible; see the Hermes skill's `references/board-coverage.md`.
