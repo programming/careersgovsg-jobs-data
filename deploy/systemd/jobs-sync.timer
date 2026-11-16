@@ -1,0 +1,19 @@
+[Unit]
+Description=Daily sync of careersgovsg job data + SQLite warehouse
+
+[Timer]
+# 23:00 Singapore time, every day, all year. The zone is named explicitly because
+# a machine in another zone would otherwise drift by an hour with its own
+# daylight saving. 23:00 SGT is 15:00 UTC: after BOTH of the day's upstream data
+# commits (their cron is 02:10/07:10 UTC plus ~35 min runtime) and after the
+# fork's own 13:00 UTC catch-up merge, so one run a day captures everything.
+# Weekends are quiet no-ops that still sweep up Friday-late commits.
+OnCalendar=*-*-* 23:00:00 Asia/Singapore
+# If the machine was off at 23:00, run as soon as it is back.
+Persistent=true
+# Spread load off the exact top of the hour.
+RandomizedDelaySec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

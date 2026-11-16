@@ -1,0 +1,19 @@
+[Unit]
+Description=Sync the careersgovsg job-listings repo and refresh the SQLite warehouse
+Documentation=file:///%h/careersgovsg-jobs-data/deploy/RUNBOOK.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/careersgovsg-jobs-data
+ExecStart=%h/careersgovsg-jobs-data/scripts/sync-and-ingest.sh
+# The run takes ~2-3 min (the ingester re-scans history even when idle), so give
+# a slow day generous headroom rather than killing a live ingest.
+TimeoutStartSec=1800
+# This is a background housekeeping job on a small box: never let it compete
+# with interactive work.
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=append:%h/.hermes/logs/jobs-sync.log
+StandardError=append:%h/.hermes/logs/jobs-sync.log
